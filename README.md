@@ -1,5 +1,6 @@
 # Pypico
-Python class to communicate with Picoscope series 5000 datalogger
+Python class to communicate with Picoscope series 5000 datalogger, from pico Technology.
+This require to install the Picoscope python SDK library: https://github.com/picotech/picosdk-python-wrappers.git
 
 This folder contains the Pypico class and some example scripts to emit and record signals with a Picoscope series 5000.
 Please refer to the Pypico file for comprehensive help on how to use the functions of the class.
