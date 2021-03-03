@@ -11,8 +11,7 @@ To use the class in a python script, write:
     from Pypico import Pypico
     p = Pypico() # create a Pypico object and starts the Picoscope.
 
-Then, you have to initialize the channels you intend to use, set the voltage range on these channels using the set_channels function.
-Example:
+Then, you have to initialize the channels you intend to use, set the voltage range on these channels using the set_channels function:
 
     p.set_channels(channels=[0, 1], channel_range=[0.2, 1]) # channels (A:0, B:1), channel_range (V)
 
@@ -22,13 +21,11 @@ Example:
     p.set_trigger(trig_channel=0, threshold_mV=10) # set the trigger on channel A
 
 To simply record data on a channel, use the function simple_record:
-Example:
 
     time_s, sig = p.simple_record([0], fs, duration) 
 This function records time and signal on channel A, at sampling frequency "fs" and for a duration "duration"
 
 To emit a chirp signal and record the impulse response of the excited structure, use function chirp_and_rec:
-Example:
 
     time_s, sig = p.chirp_and_rec([0, 1], [1], fs, duration, f1, f2)
 This function records time and impulse response on channel A, at sampling frequency "fs" and for a duration "duration"
