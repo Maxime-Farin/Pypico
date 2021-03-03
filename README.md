@@ -16,7 +16,6 @@ Then, you have to initialize the channels you intend to use, set the voltage ran
     p.set_channels(channels=[0, 1], channel_range=[0.2, 1]) # channels (A:0, B:1), channel_range (V)
 
 Set the trigger after which the Picoscope will start to save data with function set_trigger:
-Example:
 
     p.set_trigger(trig_channel=0, threshold_mV=10) # set the trigger on channel A
 
