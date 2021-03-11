@@ -280,30 +280,38 @@ class Pypico():
             Normalized impulse responses on each channels.
 
         '''
-        # Define output chirp function
-        self._define_chirp(f1, f2, duration, nb_steps)
-        
-        # Start acquisition
-        self._runblock(fs, duration*3, 0.1) # record a longer signal to be able to catch a full chirp in the recorded data (chirps are continuously swept)
-        
-        # Trigger emission
-        self.status["triggerEmission"] = ps.ps5000aSigGenSoftwareControl(self.chandle, 1)
-        assert_pico_ok(self.status["triggerEmission"])
-        
-        # Check for data collection to finish using ps5000aIsReady
-        ready = ctypes.c_int16(0)
-        check = ctypes.c_int16(0)
-        while ready.value == check.value:
-            self.status["isReady"] = ps.ps5000aIsReady(self.chandle, ctypes.byref(ready))
+        mes_ok = 1
+        while mes_ok:
+            
+            try:
+                # Define output chirp function
+                self._define_chirp(f1, f2, duration, nb_steps)
+                
+                # Start acquisition
+                self._runblock(fs, duration*3, 0.1) # record a longer signal to be able to catch a full chirp in the recorded data (chirps are continuously swept)
+                
+                # Trigger emission
+                self.status["triggerEmission"] = ps.ps5000aSigGenSoftwareControl(self.chandle, 1)
+                assert_pico_ok(self.status["triggerEmission"])
+                
+                # Check for data collection to finish using ps5000aIsReady
+                ready = ctypes.c_int16(0)
+                check = ctypes.c_int16(0)
+                while ready.value == check.value:
+                    self.status["isReady"] = ps.ps5000aIsReady(self.chandle, ctypes.byref(ready))
     
-        # Collect data from buffers
-        temps, sig = self._collect_data(channels)
-        """
-        return (temps, sig)
-        """
-        # Find chirp in data and compute the impulse response (deconvolved from chirp) for each channels
-        t_s, impulse = self._compute_impulse(temps, sig, channels, chirp_channel, duration, f1)
-    
+                # Collect data from buffers
+                temps, sig = self._collect_data(channels)
+                #return (temps, sig)
+                
+                # Find chirp in data and compute the impulse response (deconvolved from chirp) for each channels
+                t_s, impulse = self._compute_impulse(temps, sig, channels, chirp_channel, duration, f1)
+                
+                mes_ok = 0
+                
+            except:
+                print("Chirp not found, retrying...")
+                
         return (t_s, impulse)
         
     
@@ -380,7 +388,7 @@ class Pypico():
         None.
 
         '''
-        print("Start recording...")
+        #print("Start recording...")
         
         # Set number of pre and post trigger samples to be collected
         preTriggerSamples = int(duration * pretrig * fs)
@@ -433,7 +441,7 @@ class Pypico():
             signal in mV on each channel.
 
         '''
-        print("Collecting data...")
+        #print("Collecting data...")
         
         # Create buffers ready for assigning pointers for data collection
         bufferMax = {}
@@ -477,7 +485,7 @@ class Pypico():
         # Create time data (s)
         time_s = np.linspace(0, cmaxSamples.value * self.timeIntervalns.value/1e9, cmaxSamples.value)
     
-        print("Data collected!")
+        #print("Data collected!")
         return (time_s, signal_mV)
     
     
@@ -607,7 +615,10 @@ class Pypico():
             if i - clean_ind_2[-1] > 0.5*duration*fs:
                 clean_ind_2.append(i)
                 
-        index_start, index_stop = clean_ind_1[1], clean_ind_2[2] # pick indexes of the first detected full chirp
+        try:
+            index_start, index_stop = clean_ind_1[1], clean_ind_2[2] # pick indexes of the first detected full chirp
+        except:
+            raise Exception("Chirp not found !")
         
         # store the detected chirp and sig indexes
         mes_chirps = sig_chirp[index_start : index_stop]
