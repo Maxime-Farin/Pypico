@@ -243,7 +243,7 @@ class Pypico():
     
     
     
-    def chirp_and_rec(self, channels, chirp_channel, fs, duration, f1, f2, nb_steps=100):
+    def chirp_and_rec(self, channels, chirp_channel, fs, duration, f1, f2, nb_steps=10000):
         '''
         Function chirp_and_rec:
             Triggers Picoscope emission of a chirp on the external channel.
@@ -269,8 +269,10 @@ class Pypico():
             Start frequency of the chirp (Hz)
         f2 : float
             Stop frequency of the chirp (Hz)
+            The function may fail if f2 < 1.5*f1 (cannot detect phase changes)
         nb_steps : int, optional
-            Number of frequency steps between f1 and f2 in the chirp. The default is 100.
+            Number of frequency steps between f1 and f2 in the chirp. The default is 10000.
+            If it is too small, it can result in echoes of the impulse response when correlating the measured signal with the chirp.
 
         Returns
         -------
@@ -302,15 +304,16 @@ class Pypico():
     
                 # Collect data from buffers
                 temps, sig = self._collect_data(channels)
-                #return (temps, sig)
+                
+                #return (temps, sig) # for debugging
                 
                 # Find chirp in data and compute the impulse response (deconvolved from chirp) for each channels
-                t_s, impulse = self._compute_impulse(temps, sig, channels, chirp_channel, duration, f1)
+                t_s, impulse = self._compute_impulse(temps, sig, channels, chirp_channel, duration, f1, f2)
                 
                 mes_ok = 0
                 
-            except:
-                print("Chirp not found, retrying...")
+            except "chirp_not_found":
+                print("Chirp not found...")
                 
         return (t_s, impulse)
         
@@ -524,7 +527,7 @@ class Pypico():
         # sweepType = ctypes.c_int16(1) = PS5000A_UP
         # operation = 0
         shots = ctypes.c_uint32(0)
-        sweeps = ctypes.c_uint32(50) # 50 sweeps of the chirp
+        sweeps = ctypes.c_uint32(100) # 100 sweeps of the chirp
         # triggerType = ctypes.c_int16(0) = PS5000a_SIGGEN_RISING
         # triggerSource = ctypes.c_int16(0) = P5000a_SIGGEN_NONE
         # extInThreshold = 1
@@ -543,7 +546,7 @@ class Pypico():
         
         
     
-    def _compute_impulse(self, temps, sig, channels, chirp_channel, duration, f1):
+    def _compute_impulse(self, temps, sig, channels, chirp_channel, duration, f1, f2):
         '''
         Utility function _compute_impulse:
             The function generator of the picoscope sweeps chirps continuously once triggered.
@@ -576,49 +579,54 @@ class Pypico():
 
         '''
         fs = 1/(temps[2] - temps[1]) # actual sampling frequency (Hz)
-
+        b, a = signal.butter(2, [2*f1/fs, 2*f2/fs], 'bandpass') # define filter
+        
         ## define the chirp signal and the signals measured on other channels
         if isinstance(chirp_channel, list):
             chirp_channel = chirp_channel[0]
+        
+        # chirp
         index_chirp = channels.index(chirp_channel) # index of the chirp channel
-        sig_chirp = sig[:, channels[index_chirp]] # emitted chirp
+        sig_chirp = signal.filtfilt(b, a, sig[:, channels[index_chirp]]) # emitted chirp
+        
+        # signals
         channels_sig = [c for c in channels if c != chirp_channel] # channels we want to decorrelate from chirp signal
         nb_channels = len(channels_sig) # number of channels
-        
         sig_plate = np.zeros([len(sig[:, 0]), nb_channels], dtype=float) # signals to decorrelate from chirp
         for c in range(nb_channels):
-            sig_plate[:, c] = sig[:, channels_sig[c]] # channels to decorrelate from chirp
+            sig_plate[:, c] = signal.filtfilt(b, a, sig[:, channels_sig[c]]) # channels to decorrelate from chirp
             
 
         ## find chirp start and end indexes in sig_chirp 
         diff_phase = abs(np.diff(np.real(np.exp(1j*np.angle(sig_chirp))))) # compute the phase of the chirp signal
         matches = [x for x in range(len(diff_phase)) if diff_phase[x] > 0.5] # find all phase changes
         
-        # Find start and stop indexes of chirps (detect unusually long time period between phase changes => new chirp)
-        L = (1/(2*f1))*fs # number of indexes for one half period of the smallest frequency of the chirp
-        index_start = []
-        index_stop = []
-        ii = 0
-        while ii < len(matches) - 1:
-            if matches[ii+1] - matches[ii] > 0.7*L: # if the number of indexes between two phase changes is > 0.9L, a new chirp begins
-                index_start.append(matches[ii+1]) # store the start index of the new chirp
-                index_stop.append(matches[ii]) # store the end index of the last chirp
-            ii += 1
-        
-        # clean multi detections of phase changes
-        clean_ind_1 = [index_start[0]]
-        for i in index_start[1:]:
-            if i - clean_ind_1[-1] > 0.5*duration*fs: # remove detections if they are closer than the duration of the chirp
-                clean_ind_1.append(i)
-        clean_ind_2 = [index_stop[0]]
-        for i in index_stop[1:]:
-            if i - clean_ind_2[-1] > 0.5*duration*fs:
-                clean_ind_2.append(i)
-                
         try:
+            # Find start and stop indexes of chirps (detect unusually long time period between phase changes => new chirp)
+            L = (1/(2*f1))*fs # number of indexes for one half period of the smallest frequency of the chirp
+            index_start = []
+            index_stop = []
+            ii = 0
+            while ii < len(matches) - 1:
+                if matches[ii+1] - matches[ii] > 0.7*L: # if the number of indexes between two phase changes is > 0.9L, a new chirp begins
+                    index_start.append(matches[ii+1]) # store the start index of the new chirp
+                    index_stop.append(matches[ii]) # store the end index of the last chirp
+                ii += 1
+            
+            # clean multi detections of phase changes
+            clean_ind_1 = [index_start[0]]
+            for i in index_start[1:]:
+                if i - clean_ind_1[-1] > 0.5*duration*fs: # remove detections if they are closer than the duration of the chirp
+                    clean_ind_1.append(i)
+            clean_ind_2 = [index_stop[0]]
+            for i in index_stop[1:]:
+                if i - clean_ind_2[-1] > 0.5*duration*fs:
+                    clean_ind_2.append(i)
+
             index_start, index_stop = clean_ind_1[1], clean_ind_2[2] # pick indexes of the first detected full chirp
+            
         except:
-            raise Exception("Chirp not found !")
+            raise Exception("chirp_not_found")
         
         # store the detected chirp and sig indexes
         mes_chirps = sig_chirp[index_start : index_stop]
@@ -638,13 +646,25 @@ class Pypico():
             sig_mes[L : 2*L] = mes_sig[c]/max(mes_sig[c]) * signal.tukey(L, 0.05)  
         
             nb = 2**(ceil(log(chirp_mes.shape[0]) / log(2))) # length of the fft (ceil(n) is the smallest integrer above n)
-            ftchirp = np.fft.rfft(chirp_mes, nb) # fft(c(t)) fft of the chirp signal (np = numpy)
-            ftresult = np.fft.rfft(sig_mes, nb) # ftt(r(t)) : fft of the recorded signal
-            corre = np.fft.irfft(ftresult*np.conjugate(ftchirp)) # r(t) * c(-t) = h(t) * c(t) * c(-t)
-            # do the correlation between the recorded signal and the conjugate of the emitted chirp on every channels
-            impulse[:, c] = np.concatenate((corre[int(len(corre) / 2) : ], corre[:int(len(corre) / 2)]))[int(len(corre) / 2 * 0.99) : int(len(corre) / 2 * 0.99) + L_sig] # store the correlation for each channel in impulse
+            ftchirp = rfft(chirp_mes, nb) # fft(c(t)) fft of the chirp signal (np = numpy)
+            ftresult = rfft(sig_mes, nb) # ftt(r(t)) : fft of the recorded signal
             
-            impulse[:, c] = impulse[:, c] / max(impulse[:, c]) # normalize the impulse
+            '''
+            # Test by dividing the measured spectrum by the chirp spectrum (not clean because it amplifies noise)
+            freq = np.linspace(0, fs/2, len(ftchirp)) # frequency vector
+            indf1 = np.argmin(np.abs(freq - f1)) # index of the smallest chirp frequency
+            indf2 = np.argmin(np.abs(freq - f2)) # index of the highest chirp frequency 
+            # Divide the result spectrum by the chirp spectrum to retrieve the impulse response (R(f) = C(f) * H(f))
+            ftimpulse = np.zeros([len(ftresult)], dtype=complex)
+            ftimpulse[indf1 : indf2] =  ftresult[indf1 : indf2] / ftchirp[indf1 : indf2] * signal.tukey(len(ftchirp[indf1 : indf2]), 0.05)   
+            corre = irfft(ftimpulse)
+            '''
+            
+            # Correlation with the chirp
+            corre = irfft(ftresult*np.conjugate(ftchirp)) # r(t) * c(-t) = h(t) * c(t) * c(-t)
+            
+            # do the correlation between the recorded signal and the conjugate of the emitted chirp on every channels
+            impulse[:, c] = corre[: L_sig] / np.max(corre[: L_sig]) # store the normalized correlation for each channel in impulse
             
         t_s = np.linspace(0, duration, L_sig) # time signal in sec
         
