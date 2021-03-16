@@ -312,7 +312,7 @@ class Pypico():
                 
                 mes_ok = 0
                 
-            except "chirp_not_found":
+            except:
                 print("Chirp not found...")
                 
         return (t_s, impulse)
